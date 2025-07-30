@@ -46,15 +46,24 @@ class SoundManager {
 let CANVAS_WIDTH = 800;
 let CANVAS_HEIGHT = 600;
 const SHIP_SIZE = 20;
-const SHIP_SPEED = 5;
-const ROTATION_SPEED = 0.08;
-const FRICTION = 0.98;
+const SHIP_SPEED = 2.5;
+const ROTATION_SPEED = 0.003; // 姿勢制御スラスターの角加速度
+const ROTATION_FRICTION = 0.95; // 回転摩擦（空気抵抗的な効果）
+const MAX_ROTATION_SPEED = 0.15; // 最大回転速度制限
+const RCS_THRUST_ARM = SHIP_SIZE * 0.7; // 回転スラスターの重心からの距離
+const RCS_SIDE_THRUST = 0.008; // 回転スラスターの副次的な並進力（控えめに設定）
+const FRICTION = 0.995;
 const BULLET_SPEED = 10;
-const ASTEROID_SPEED = 2;
+const ASTEROID_SPEED = 1.5; // 75%に減速（2 × 0.75 = 1.5）
+const ASTEROID_SPEED_MIN = 0.5; // 最小速度倍率
+const ASTEROID_SPEED_MAX = 2.5; // 最大速度倍率
+const FAST_ASTEROID_CHANCE = 0.15; // 高速小惑星の出現確率
 const ASTEROID_VERTICES = 10;
 const ASTEROID_JAG = 0.4; // 頂点の凹凸の度合い(0-1)
 const ASTEROID_SIZE = 100;
 const ASTEROID_COUNT = 5;
+const EXPLOSION_LINES = 12; // 爆発線の数
+const EXPLOSION_DURATION = 30; // 爆発エフェクトの持続時間（フレーム）
 
 // ゲームオブジェクトの型定義
 type Vector = {
@@ -66,6 +75,7 @@ type Ship = {
     position: Vector;
     velocity: Vector;
     rotation: number; // ラジアン
+    rotationVelocity: number; // 角速度（ラジアン/フレーム）
     thrusting: boolean;
 };
 
@@ -82,10 +92,18 @@ type Asteroid = {
     vertices: Vector[];
 };
 
+type ExplosionEffect = {
+    position: Vector;
+    lines: { angle: number; length: number; opacity: number }[];
+    duration: number;
+    maxDuration: number;
+};
+
 // ゲーム状態
 let ship: Ship;
 let bullets: Bullet[] = [];
 let asteroids: Asteroid[] = [];
+let explosionEffects: ExplosionEffect[] = [];
 let score = 0;
 let lives = 3;
 let level = 1;
@@ -182,12 +200,14 @@ function initGame() {
         position: { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 },
         velocity: { x: 0, y: 0 },
         rotation: 0,
+        rotationVelocity: 0,
         thrusting: false
     };
 
-    // 弾と小惑星の初期化
+    // 弾、小惑星、エフェクトの初期化
     bullets = [];
     asteroids = [];
+    explosionEffects = [];
     
     // 初期小惑星を生成
     for (let i = 0; i < ASTEROID_COUNT; i++) {
@@ -231,13 +251,40 @@ function createAsteroid() {
             break;
     }
     
-    // ランダムな速度を設定
-    const angle = Math.atan2(
-        ship.position.y - y,
-        ship.position.x - x
-    );
+    // ランダムな移動方向を設定（宇宙船に向かわない）
+    // 画面端から入ってきた場合の自然な軌道を計算
+    let angle;
+    switch (side) {
+        case 0: // 上から
+            angle = Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.8; // 下方向中心に±72度
+            break;
+        case 1: // 右から
+            angle = Math.PI + (Math.random() - 0.5) * Math.PI * 0.8; // 左方向中心に±72度
+            break;
+        case 2: // 下から  
+            angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.8; // 上方向中心に±72度
+            break;
+        case 3: // 左から
+            angle = 0 + (Math.random() - 0.5) * Math.PI * 0.8; // 右方向中心に±72度
+            break;
+    }
     
-    const speed = ASTEROID_SPEED * (0.5 + Math.random() * 0.5);
+    // 速度バリエーション：通常・高速・低速の3種類
+    let speedMultiplier;
+    const speedType = Math.random();
+    
+    if (speedType < FAST_ASTEROID_CHANCE) {
+        // 高速小惑星（15%の確率）
+        speedMultiplier = ASTEROID_SPEED_MIN + (ASTEROID_SPEED_MAX - ASTEROID_SPEED_MIN) * (0.7 + Math.random() * 0.3);
+    } else if (speedType < 0.35) {
+        // 低速小惑星（20%の確率）
+        speedMultiplier = ASTEROID_SPEED_MIN + (ASTEROID_SPEED_MAX - ASTEROID_SPEED_MIN) * Math.random() * 0.4;
+    } else {
+        // 通常速度（65%の確率）
+        speedMultiplier = ASTEROID_SPEED_MIN + (ASTEROID_SPEED_MAX - ASTEROID_SPEED_MIN) * (0.3 + Math.random() * 0.5);
+    }
+    
+    const speed = ASTEROID_SPEED * speedMultiplier;
     
     // 頂点の生成
     const vertices: Vector[] = [];
@@ -265,20 +312,28 @@ function createAsteroid() {
 
 // 宇宙船の更新
 function updateShip() {
-    // 回転
+    // 姿勢制御スラスター（回転 + 副次的な並進力）
     if (keys['ArrowLeft']) {
-        ship.rotation -= ROTATION_SPEED;
+        ship.rotationVelocity -= ROTATION_SPEED;
+        // 左回転スラスター：宇宙船の右側面方向に力が発生
+        const sideForceAngle = ship.rotation + Math.PI / 2; // 90度右回り
+        ship.velocity.x += Math.cos(sideForceAngle) * RCS_SIDE_THRUST;
+        ship.velocity.y += Math.sin(sideForceAngle) * RCS_SIDE_THRUST;
     }
     if (keys['ArrowRight']) {
-        ship.rotation += ROTATION_SPEED;
+        ship.rotationVelocity += ROTATION_SPEED;
+        // 右回転スラスター：宇宙船の左側面方向に力が発生
+        const sideForceAngle = ship.rotation - Math.PI / 2; // 90度左回り
+        ship.velocity.x += Math.cos(sideForceAngle) * RCS_SIDE_THRUST;
+        ship.velocity.y += Math.sin(sideForceAngle) * RCS_SIDE_THRUST;
     }
     
     // 推進
     ship.thrusting = false;
     if (keys['ArrowUp']) {
         ship.thrusting = true;
-        ship.velocity.x += Math.cos(ship.rotation) * SHIP_SPEED * 0.1;
-        ship.velocity.y += Math.sin(ship.rotation) * SHIP_SPEED * 0.1;
+        ship.velocity.x += Math.cos(ship.rotation) * SHIP_SPEED * 0.05;
+        ship.velocity.y += Math.sin(ship.rotation) * SHIP_SPEED * 0.05;
         
         // 推進音を再生（まだ再生中でなければ）
         if (!soundManager.isPlaying('thruster')) {
@@ -290,6 +345,20 @@ function updateShip() {
             soundManager.stop('thruster');
         }
     }
+    
+    // 回転速度制限
+    if (ship.rotationVelocity > MAX_ROTATION_SPEED) {
+        ship.rotationVelocity = MAX_ROTATION_SPEED;
+    }
+    if (ship.rotationVelocity < -MAX_ROTATION_SPEED) {
+        ship.rotationVelocity = -MAX_ROTATION_SPEED;
+    }
+    
+    // 回転摩擦（姿勢制御スラスターの空気抵抗的効果）
+    ship.rotationVelocity *= ROTATION_FRICTION;
+    
+    // 回転角度の更新
+    ship.rotation += ship.rotationVelocity;
     
     // 摩擦
     ship.velocity.x *= FRICTION;
@@ -392,12 +461,28 @@ function checkCollisions() {
                 if (asteroid.radius > 20) {
                     for (let k = 0; k < 2; k++) {
                         const angle = Math.random() * Math.PI * 2;
-                        const speed = ASTEROID_SPEED * (0.5 + Math.random() * 0.5);
+                        
+                        // 分裂時の速度バリエーション（より活発な動き）
+                        let speedMultiplier;
+                        const speedType = Math.random();
+                        
+                        if (speedType < 0.3) {
+                            // 高速破片（30%の確率）
+                            speedMultiplier = 0.8 + Math.random() * 0.7;
+                        } else {
+                            // 通常速度破片（70%の確率）
+                            speedMultiplier = 0.4 + Math.random() * 0.6;
+                        }
+                        
+                        const newSize = asteroid.radius * 0.6;
+                        
+                        // サイズと速度の逆比例関係（小さいほど速い）
+                        const sizeSpeedBonus = Math.max(1.0, (ASTEROID_SIZE / 2) / newSize * 0.3);
+                        const speed = ASTEROID_SPEED * speedMultiplier * sizeSpeedBonus;
                         
                         // 頂点の生成
                         const vertices: Vector[] = [];
                         const angleStep = (Math.PI * 2) / ASTEROID_VERTICES;
-                        const newSize = asteroid.radius * 0.6;
                         
                         for (let l = 0; l < ASTEROID_VERTICES; l++) {
                             const radius = newSize * (0.8 + Math.random() * 0.4);
@@ -436,6 +521,9 @@ function checkCollisions() {
             lives--;
             updateUI();
             
+            // 爆発エフェクトを生成
+            createExplosionEffect(ship.position.x, ship.position.y);
+            
             // 爆発音を再生
             soundManager.play('explosion');
             
@@ -446,11 +534,72 @@ function checkCollisions() {
                 // 宇宙船を初期位置に戻す
                 ship.position = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
                 ship.velocity = { x: 0, y: 0 };
+                ship.rotationVelocity = 0;
             }
             
             break;
         }
     }
+}
+
+// 爆発エフェクトの生成
+function createExplosionEffect(x: number, y: number) {
+    const lines: { angle: number; length: number; opacity: number }[] = [];
+    
+    for (let i = 0; i < EXPLOSION_LINES; i++) {
+        lines.push({
+            angle: (Math.PI * 2 * i) / EXPLOSION_LINES + (Math.random() - 0.5) * 0.5,
+            length: 15 + Math.random() * 25,
+            opacity: 0.8 + Math.random() * 0.2
+        });
+    }
+    
+    explosionEffects.push({
+        position: { x, y },
+        lines,
+        duration: EXPLOSION_DURATION,
+        maxDuration: EXPLOSION_DURATION
+    });
+}
+
+// 爆発エフェクトの更新
+function updateExplosionEffects() {
+    for (let i = explosionEffects.length - 1; i >= 0; i--) {
+        const effect = explosionEffects[i];
+        effect.duration--;
+        
+        if (effect.duration <= 0) {
+            explosionEffects.splice(i, 1);
+        }
+    }
+}
+
+// 爆発エフェクトの描画
+function drawExplosionEffects() {
+    ctx.save();
+    ctx.strokeStyle = '#FF4444'; // 赤色
+    ctx.lineWidth = 2;
+    
+    for (const effect of explosionEffects) {
+        const progress = 1 - (effect.duration / effect.maxDuration);
+        const fadeOut = effect.duration / effect.maxDuration;
+        
+        ctx.globalAlpha = fadeOut;
+        
+        for (const line of effect.lines) {
+            const currentLength = line.length * (0.3 + progress * 0.7);
+            
+            ctx.beginPath();
+            ctx.moveTo(effect.position.x, effect.position.y);
+            ctx.lineTo(
+                effect.position.x + Math.cos(line.angle) * currentLength,
+                effect.position.y + Math.sin(line.angle) * currentLength
+            );
+            ctx.stroke();
+        }
+    }
+    
+    ctx.restore();
 }
 
 // 宇宙船の描画
@@ -538,15 +687,32 @@ function createLevelAdjustedAsteroid() {
     const sizeMultiplier = Math.max(0.8, 1.2 - (level - 1) * 0.1); // レベルが上がると少し小さく
     
     let x, y;
+    // 宇宙船から十分離れた場所に生成（より安全な距離）
     do {
         x = Math.random() * CANVAS_WIDTH;
         y = Math.random() * CANVAS_HEIGHT;
     } while (
-        Math.sqrt((x - ship.position.x) ** 2 + (y - ship.position.y) ** 2) < 100
+        Math.sqrt((x - ship.position.x) ** 2 + (y - ship.position.y) ** 2) < 150
     );
 
     const angle = Math.random() * Math.PI * 2;
-    const speed = ASTEROID_SPEED * speedMultiplier * (0.5 + Math.random() * 0.5);
+    
+    // レベル調整 + 速度バリエーション
+    let baseSpeedMultiplier;
+    const speedType = Math.random();
+    
+    if (speedType < FAST_ASTEROID_CHANCE) {
+        // 高速小惑星（15%の確率）
+        baseSpeedMultiplier = ASTEROID_SPEED_MIN + (ASTEROID_SPEED_MAX - ASTEROID_SPEED_MIN) * (0.7 + Math.random() * 0.3);
+    } else if (speedType < 0.35) {
+        // 低速小惑星（20%の確率）
+        baseSpeedMultiplier = ASTEROID_SPEED_MIN + (ASTEROID_SPEED_MAX - ASTEROID_SPEED_MIN) * Math.random() * 0.4;
+    } else {
+        // 通常速度（65%の確率）
+        baseSpeedMultiplier = ASTEROID_SPEED_MIN + (ASTEROID_SPEED_MAX - ASTEROID_SPEED_MIN) * (0.3 + Math.random() * 0.5);
+    }
+    
+    const speed = ASTEROID_SPEED * speedMultiplier * baseSpeedMultiplier;
     const size = ASTEROID_SIZE * sizeMultiplier * (0.8 + Math.random() * 0.4);
 
     // 頂点の生成
@@ -609,6 +775,7 @@ function gameLoop() {
         updateShip();
         updateBullets();
         updateAsteroids();
+        updateExplosionEffects();
         checkCollisions();
         checkLevelProgress();
     }
@@ -619,9 +786,11 @@ function gameLoop() {
     
     if (!gameOver) {
         drawShip();
-        drawBullets();
-        drawAsteroids();
     }
+    
+    drawBullets();
+    drawAsteroids();
+    drawExplosionEffects();
     
     requestAnimationFrame(gameLoop);
 }
