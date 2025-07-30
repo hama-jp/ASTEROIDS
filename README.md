@@ -25,7 +25,11 @@ Control a spaceship and destroy incoming asteroids in this shooting game. As you
 
 ## 🚀 How to Play
 
-### Running with Local Server
+### Quick Start (Simple Method)
+
+Simply download the files and open `index.html` directly in your web browser. This works for most modern browsers!
+
+### Running with Local Server (Recommended)
 
 ```bash
 # Using Python
