@@ -9,6 +9,7 @@ var __assign = (this && this.__assign) || function () {
     };
     return __assign.apply(this, arguments);
 };
+var _a;
 // 効果音を管理するクラス
 var SoundManager = /** @class */ (function () {
     function SoundManager() {
@@ -70,11 +71,35 @@ var ASTEROID_SIZE = 100;
 var ASTEROID_COUNT = 5;
 var EXPLOSION_LINES = 12; // 爆発線の数
 var EXPLOSION_DURATION = 30; // 爆発エフェクトの持続時間（フレーム）
+// パワーアップタイプの定義
+var PowerUpType;
+(function (PowerUpType) {
+    PowerUpType["SHIELD"] = "shield";
+    PowerUpType["TRIPLE_SHOT"] = "triple_shot";
+    PowerUpType["RAPID_FIRE"] = "rapid_fire";
+    PowerUpType["SCORE_MULTIPLIER"] = "score_multiplier";
+})(PowerUpType || (PowerUpType = {}));
 // ゲーム状態
 var ship;
 var bullets = [];
 var asteroids = [];
 var explosionEffects = [];
+// パワーアップ関連の変数
+var powerUps = [];
+var activePowerUps = [];
+// パワーアップ設定
+var POWER_UP_SIZE = 15;
+var POWER_UP_SPAWN_CHANCE = 0.3; // 小惑星破壊時のスポーン確率
+var POWER_UP_LIFETIME = 900; // 15秒（60fps想定）
+var POWER_UP_SPEED = 0.5;
+// パワーアップ効果時間（フレーム数）
+var POWER_UP_DURATIONS = (_a = {},
+    _a[PowerUpType.SHIELD] = 600,
+    _a[PowerUpType.TRIPLE_SHOT] = 480,
+    _a[PowerUpType.RAPID_FIRE] = 360,
+    _a[PowerUpType.SCORE_MULTIPLIER] = 420 // 7秒
+,
+    _a);
 var score = 0;
 var lives = 3;
 var level = 1;
@@ -354,20 +379,189 @@ function updateAsteroids() {
 }
 // 弾の発射
 function shootBullet() {
-    bullets.push({
-        position: {
-            x: ship.position.x + Math.cos(ship.rotation) * SHIP_SIZE,
-            y: ship.position.y + Math.sin(ship.rotation) * SHIP_SIZE
-        },
-        velocity: {
-            x: Math.cos(ship.rotation) * BULLET_SPEED + ship.velocity.x,
-            y: Math.sin(ship.rotation) * BULLET_SPEED + ship.velocity.y
-        }
-    });
+    if (hasPowerUp(PowerUpType.TRIPLE_SHOT)) {
+        // 3方向射撃
+        var angles = [ship.rotation - 0.3, ship.rotation, ship.rotation + 0.3];
+        angles.forEach(function (angle) {
+            bullets.push({
+                position: {
+                    x: ship.position.x + Math.cos(angle) * SHIP_SIZE,
+                    y: ship.position.y + Math.sin(angle) * SHIP_SIZE
+                },
+                velocity: {
+                    x: Math.cos(angle) * BULLET_SPEED + ship.velocity.x,
+                    y: Math.sin(angle) * BULLET_SPEED + ship.velocity.y
+                }
+            });
+        });
+    }
+    else {
+        // 通常射撃
+        bullets.push({
+            position: {
+                x: ship.position.x + Math.cos(ship.rotation) * SHIP_SIZE,
+                y: ship.position.y + Math.sin(ship.rotation) * SHIP_SIZE
+            },
+            velocity: {
+                x: Math.cos(ship.rotation) * BULLET_SPEED + ship.velocity.x,
+                y: Math.sin(ship.rotation) * BULLET_SPEED + ship.velocity.y
+            }
+        });
+    }
     // レーザー音を再生
     soundManager.play('laser');
 }
 // 衝突判定
+// パワーアップ生成関数
+function createPowerUp(x, y) {
+    if (Math.random() < POWER_UP_SPAWN_CHANCE) {
+        var types = [PowerUpType.SHIELD, PowerUpType.TRIPLE_SHOT, PowerUpType.RAPID_FIRE, PowerUpType.SCORE_MULTIPLIER];
+        var randomType = types[Math.floor(Math.random() * types.length)];
+        var powerUp = {
+            position: { x: x, y: y },
+            velocity: {
+                x: (Math.random() - 0.5) * POWER_UP_SPEED,
+                y: (Math.random() - 0.5) * POWER_UP_SPEED
+            },
+            type: randomType,
+            size: POWER_UP_SIZE,
+            rotation: 0,
+            lifeTime: 0,
+            maxLifeTime: POWER_UP_LIFETIME
+        };
+        powerUps.push(powerUp);
+    }
+}
+// パワーアップの更新
+function updatePowerUps() {
+    for (var i = powerUps.length - 1; i >= 0; i--) {
+        var powerUp = powerUps[i];
+        // 位置更新
+        powerUp.position.x += powerUp.velocity.x;
+        powerUp.position.y += powerUp.velocity.y;
+        powerUp.rotation += 0.02;
+        powerUp.lifeTime++;
+        // 画面端でのラップアラウンド
+        if (powerUp.position.x < 0)
+            powerUp.position.x = CANVAS_WIDTH;
+        if (powerUp.position.x > CANVAS_WIDTH)
+            powerUp.position.x = 0;
+        if (powerUp.position.y < 0)
+            powerUp.position.y = CANVAS_HEIGHT;
+        if (powerUp.position.y > CANVAS_HEIGHT)
+            powerUp.position.y = 0;
+        // ライフタイム終了で削除
+        if (powerUp.lifeTime >= powerUp.maxLifeTime) {
+            powerUps.splice(i, 1);
+        }
+    }
+    // アクティブなパワーアップの時間管理
+    for (var i = activePowerUps.length - 1; i >= 0; i--) {
+        activePowerUps[i].duration--;
+        if (activePowerUps[i].duration <= 0) {
+            activePowerUps.splice(i, 1);
+        }
+    }
+}
+// パワーアップの描画
+function drawPowerUps() {
+    powerUps.forEach(function (powerUp) {
+        ctx.save();
+        ctx.translate(powerUp.position.x, powerUp.position.y);
+        ctx.rotate(powerUp.rotation);
+        // パワーアップタイプに応じて色を変更
+        var color;
+        switch (powerUp.type) {
+            case PowerUpType.SHIELD:
+                color = '#00FFFF'; // シアン
+                break;
+            case PowerUpType.TRIPLE_SHOT:
+                color = '#FF4500'; // オレンジレッド
+                break;
+            case PowerUpType.RAPID_FIRE:
+                color = '#FFD700'; // ゴールド
+                break;
+            case PowerUpType.SCORE_MULTIPLIER:
+                color = '#9932CC'; // ダークオーキッド
+                break;
+        }
+        // 点滅効果（ライフタイムが終わりに近づくと）
+        var blinkThreshold = powerUp.maxLifeTime * 0.8;
+        if (powerUp.lifeTime > blinkThreshold) {
+            var blinkSpeed = Math.sin((powerUp.lifeTime - blinkThreshold) * 0.3);
+            ctx.globalAlpha = blinkSpeed > 0 ? 1 : 0.3;
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        // 六角形の描画
+        for (var i = 0; i < 6; i++) {
+            var angle = (i * Math.PI) / 3;
+            var x = Math.cos(angle) * powerUp.size;
+            var y = Math.sin(angle) * powerUp.size;
+            if (i === 0)
+                ctx.moveTo(x, y);
+            else
+                ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        // パワーアップタイプのアイコン描画
+        ctx.fillStyle = color;
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        var symbol;
+        switch (powerUp.type) {
+            case PowerUpType.SHIELD:
+                symbol = 'S';
+                break;
+            case PowerUpType.TRIPLE_SHOT:
+                symbol = '3';
+                break;
+            case PowerUpType.RAPID_FIRE:
+                symbol = 'R';
+                break;
+            case PowerUpType.SCORE_MULTIPLIER:
+                symbol = 'M';
+                break;
+        }
+        ctx.fillText(symbol, 0, 0);
+        ctx.restore();
+    });
+}
+// パワーアップ効果の適用
+function applyPowerUp(type) {
+    // 既存の同じパワーアップがあれば時間延長、なければ新規追加
+    var existing;
+    for (var _i = 0, activePowerUps_1 = activePowerUps; _i < activePowerUps_1.length; _i++) {
+        var p = activePowerUps_1[_i];
+        if (p.type === type) {
+            existing = p;
+            break;
+        }
+    }
+    if (existing) {
+        existing.duration = Math.max(existing.duration, POWER_UP_DURATIONS[type]);
+    }
+    else {
+        activePowerUps.push({
+            type: type,
+            duration: POWER_UP_DURATIONS[type],
+            maxDuration: POWER_UP_DURATIONS[type]
+        });
+    }
+}
+// パワーアップ効果の確認
+function hasPowerUp(type) {
+    for (var _i = 0, activePowerUps_2 = activePowerUps; _i < activePowerUps_2.length; _i++) {
+        var p = activePowerUps_2[_i];
+        if (p.type === type) {
+            return true;
+        }
+    }
+    return false;
+}
 function checkCollisions() {
     // 弾と小惑星の衝突判定
     for (var i = bullets.length - 1; i >= 0; i--) {
@@ -383,9 +577,15 @@ function checkCollisions() {
                 asteroids.splice(j, 1);
                 // 爆発音を再生
                 soundManager.play('explosion');
-                // スコア加算
-                score += 100;
+                // スコア加算（スコア倍率パワーアップを考慮）
+                var baseScore = 100;
+                if (hasPowerUp(PowerUpType.SCORE_MULTIPLIER)) {
+                    baseScore *= 2;
+                }
+                score += baseScore;
                 updateUI();
+                // パワーアップ生成チャンス
+                createPowerUp(asteroid.position.x, asteroid.position.y);
                 // 新しい小惑星を生成（分裂）
                 if (asteroid.radius > 20) {
                     for (var k = 0; k < 2; k++) {
@@ -431,31 +631,47 @@ function checkCollisions() {
             }
         }
     }
-    // 宇宙船と小惑星の衝突判定
-    for (var _i = 0, asteroids_2 = asteroids; _i < asteroids_2.length; _i++) {
-        var asteroid = asteroids_2[_i];
-        var dx = ship.position.x - asteroid.position.x;
-        var dy = ship.position.y - asteroid.position.y;
+    // 宇宙船と小惑星の衝突判定（シールドパワーアップを考慮）
+    if (!hasPowerUp(PowerUpType.SHIELD)) {
+        for (var _i = 0, asteroids_2 = asteroids; _i < asteroids_2.length; _i++) {
+            var asteroid = asteroids_2[_i];
+            var dx = ship.position.x - asteroid.position.x;
+            var dy = ship.position.y - asteroid.position.y;
+            var distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < asteroid.radius + SHIP_SIZE / 2) {
+                // 衝突処理
+                lives--;
+                updateUI();
+                // 爆発エフェクトを生成
+                createExplosionEffect(ship.position.x, ship.position.y);
+                // 爆発音を再生
+                soundManager.play('explosion');
+                if (lives <= 0) {
+                    gameOver = true;
+                    showGameOver();
+                }
+                else {
+                    // 宇宙船を初期位置に戻す
+                    ship.position = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+                    ship.velocity = { x: 0, y: 0 };
+                    ship.rotationVelocity = 0;
+                }
+                break;
+            }
+        }
+    }
+    // 宇宙船とパワーアップの衝突判定
+    for (var i = powerUps.length - 1; i >= 0; i--) {
+        var powerUp = powerUps[i];
+        var dx = ship.position.x - powerUp.position.x;
+        var dy = ship.position.y - powerUp.position.y;
         var distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance < asteroid.radius + SHIP_SIZE / 2) {
-            // 衝突処理
-            lives--;
-            updateUI();
-            // 爆発エフェクトを生成
-            createExplosionEffect(ship.position.x, ship.position.y);
-            // 爆発音を再生
-            soundManager.play('explosion');
-            if (lives <= 0) {
-                gameOver = true;
-                showGameOver();
-            }
-            else {
-                // 宇宙船を初期位置に戻す
-                ship.position = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
-                ship.velocity = { x: 0, y: 0 };
-                ship.rotationVelocity = 0;
-            }
-            break;
+        if (distance < SHIP_SIZE / 2 + powerUp.size) {
+            // パワーアップ取得
+            powerUps.splice(i, 1);
+            applyPowerUp(powerUp.type);
+            // パワーアップ取得音（レーザー音を代用）
+            soundManager.play('laser');
         }
     }
 }
@@ -512,6 +728,28 @@ function drawShip() {
     ctx.save();
     ctx.translate(ship.position.x, ship.position.y);
     ctx.rotate(ship.rotation);
+    // シールドエフェクト
+    if (hasPowerUp(PowerUpType.SHIELD)) {
+        var shieldPowerUp = void 0;
+        for (var _i = 0, activePowerUps_3 = activePowerUps; _i < activePowerUps_3.length; _i++) {
+            var p = activePowerUps_3[_i];
+            if (p.type === PowerUpType.SHIELD) {
+                shieldPowerUp = p;
+                break;
+            }
+        }
+        if (shieldPowerUp) {
+            // 残り時間に応じて点滅
+            var timeRatio = shieldPowerUp.duration / shieldPowerUp.maxDuration;
+            if (timeRatio > 0.3 || Math.sin(Date.now() * 0.02) > 0) {
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(0, 0, SHIP_SIZE + 8, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+    }
     // 宇宙船の本体
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
@@ -631,6 +869,48 @@ function updateUI() {
     levelElement.textContent = "Level: ".concat(level);
     highScoreElement.textContent = "High Score: ".concat(highScore);
 }
+// パワーアップステータス表示の更新
+function updatePowerUpUI() {
+    // 既存のパワーアップ表示をクリア
+    var existingStatus = document.getElementById('power-up-status');
+    if (existingStatus) {
+        existingStatus.remove();
+    }
+    if (activePowerUps.length > 0) {
+        var statusDiv = document.createElement('div');
+        statusDiv.id = 'power-up-status';
+        statusDiv.style.position = 'absolute';
+        statusDiv.style.top = '10px';
+        statusDiv.style.right = '10px';
+        statusDiv.style.color = '#fff';
+        statusDiv.style.fontSize = '12px';
+        statusDiv.style.background = 'rgba(0,0,0,0.7)';
+        statusDiv.style.padding = '10px';
+        statusDiv.style.borderRadius = '5px';
+        var statusText_1 = 'Active Power-ups:<br>';
+        activePowerUps.forEach(function (powerUp) {
+            var seconds = Math.ceil(powerUp.duration / 60);
+            var name = '';
+            switch (powerUp.type) {
+                case PowerUpType.SHIELD:
+                    name = 'Shield';
+                    break;
+                case PowerUpType.TRIPLE_SHOT:
+                    name = 'Triple Shot';
+                    break;
+                case PowerUpType.RAPID_FIRE:
+                    name = 'Rapid Fire';
+                    break;
+                case PowerUpType.SCORE_MULTIPLIER:
+                    name = 'Score x2';
+                    break;
+            }
+            statusText_1 += "".concat(name, ": ").concat(seconds, "s<br>");
+        });
+        statusDiv.innerHTML = statusText_1;
+        document.body.appendChild(statusDiv);
+    }
+}
 // ゲームオーバー表示
 function showGameOver() {
     updateHighScore();
@@ -648,15 +928,24 @@ function restartGame() {
 function gameLoop() {
     // キー入力処理（スペースキーで弾を発射）
     if (keys[' '] && !gameOver) {
-        shootBullet();
-        // スペースキーを一度押したあと、連射しないようにキー状態をリセット
-        keys[' '] = false;
+        // 連射パワーアップの処理
+        if (hasPowerUp(PowerUpType.RAPID_FIRE)) {
+            // 連射モード：毎フレーム発射可能
+            shootBullet();
+        }
+        else {
+            // 通常モード：一度押したあと連射しない
+            shootBullet();
+            keys[' '] = false;
+        }
     }
     if (!gameOver) {
         // ゲーム状態の更新
         updateShip();
         updateBullets();
         updateAsteroids();
+        updatePowerUps();
+        updatePowerUpUI();
         updateExplosionEffects();
         checkCollisions();
         checkLevelProgress();
@@ -669,6 +958,7 @@ function gameLoop() {
     }
     drawBullets();
     drawAsteroids();
+    drawPowerUps();
     drawExplosionEffects();
     requestAnimationFrame(gameLoop);
 }
