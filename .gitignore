@@ -1,5 +1,7 @@
-# Serena (AI assistant) files
+# AI assistant files
 .serena/
+.claude/
+CLAUDE.md
 
 # Node modules (if any)
 node_modules/
