@@ -2,6 +2,12 @@
 
 A classic ASTEROIDS-style browser game developed with HTML5 Canvas and TypeScript.
 
+## 🎮 Play Now!
+
+**[🚀 すぐに遊ぶ - Play Instantly](https://hama-jp.github.io/ASTEROIDS/)**
+
+Click the link above to play the game immediately in your browser!
+
 ## 🎮 Game Overview
 
 Control a spaceship and destroy incoming asteroids in this shooting game. As you destroy asteroids, the level increases and more fast-moving asteroids appear.
