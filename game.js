@@ -135,6 +135,15 @@ var UFO_SETTINGS = (_b = {},
 // UFO弾設定
 var UFO_BULLET_SPEED = 3;
 var UFO_BULLET_LIFE = 300; // 5秒
+// ゲームジュース用の変数
+var screenShake = null;
+var particles = [];
+var freezeFrames = 0;
+// ゲームジュース設定
+var SCREEN_SHAKE_INTENSITY = 8;
+var SCREEN_SHAKE_DURATION = 40; // フレーム数
+var FREEZE_FRAME_DURATION = 4; // フレーム数
+var MAX_PARTICLES = 100;
 var score = 0;
 var lives = 3;
 var level = 1;
@@ -695,6 +704,23 @@ function updateUFOs() {
         }
     }
 }
+// 画面シェイクの開始
+function startScreenShake(intensity) {
+    screenShake = {
+        intensity: intensity || SCREEN_SHAKE_INTENSITY,
+        duration: SCREEN_SHAKE_DURATION,
+        maxDuration: SCREEN_SHAKE_DURATION
+    };
+}
+// 画面シェイクの更新
+function updateScreenShake() {
+    if (screenShake) {
+        screenShake.duration--;
+        if (screenShake.duration <= 0) {
+            screenShake = null;
+        }
+    }
+}
 // UFO弾の発射
 function shootUFOBullet(ufo) {
     // プレイヤーの位置を予測して射撃（簡易な先読み）
@@ -735,6 +761,82 @@ function updateUFOBullets() {
         }
     }
 }
+// フリーズフレームの開始
+function startFreezeFrame() {
+    freezeFrames = FREEZE_FRAME_DURATION;
+}
+// パーティクルの生成
+function createParticles(x, y, count, type) {
+    for (var i = 0; i < count; i++) {
+        if (particles.length >= MAX_PARTICLES)
+            break;
+        var angle = Math.random() * Math.PI * 2;
+        var speed = type === 'thruster' ? 1 + Math.random() * 2 : 2 + Math.random() * 4;
+        var color = void 0;
+        var size = void 0;
+        var life = void 0;
+        switch (type) {
+            case 'debris':
+                color = '#888888';
+                size = 2 + Math.random() * 3;
+                life = 30 + Math.random() * 20;
+                break;
+            case 'spark':
+                color = '#FFD700';
+                size = 1 + Math.random() * 2;
+                life = 15 + Math.random() * 10;
+                break;
+            case 'thruster':
+                color = '#FF6600';
+                size = 1 + Math.random() * 2;
+                life = 20 + Math.random() * 15;
+                break;
+        }
+        particles.push({
+            position: { x: x + (Math.random() - 0.5) * 10, y: y + (Math.random() - 0.5) * 10 },
+            velocity: {
+                x: Math.cos(angle) * speed,
+                y: Math.sin(angle) * speed
+            },
+            color: color,
+            size: size,
+            life: life,
+            maxLife: life,
+            type: type
+        });
+    }
+}
+// パーティクルの更新
+function updateParticles() {
+    for (var i = particles.length - 1; i >= 0; i--) {
+        var particle = particles[i];
+        // 位置更新
+        particle.position.x += particle.velocity.x;
+        particle.position.y += particle.velocity.y;
+        // 摩擦
+        particle.velocity.x *= 0.98;
+        particle.velocity.y *= 0.98;
+        // スラスターパーティクルは重力の影響
+        if (particle.type === 'thruster') {
+            particle.velocity.y += 0.1;
+        }
+        // ライフ減少
+        particle.life--;
+        // 画面端でのラップアラウンド
+        if (particle.position.x < 0)
+            particle.position.x = CANVAS_WIDTH;
+        if (particle.position.x > CANVAS_WIDTH)
+            particle.position.x = 0;
+        if (particle.position.y < 0)
+            particle.position.y = CANVAS_HEIGHT;
+        if (particle.position.y > CANVAS_HEIGHT)
+            particle.position.y = 0;
+        // ライフが終了したら削除
+        if (particle.life <= 0) {
+            particles.splice(i, 1);
+        }
+    }
+}
 // UFOの描画
 function drawUFOs() {
     ufos.forEach(function (ufo) {
@@ -760,6 +862,28 @@ function drawUFOs() {
             if (flashSpeed > 0) {
                 ctx.stroke();
             }
+        }
+        ctx.restore();
+    });
+}
+// パーティクルの描画
+function drawParticles() {
+    particles.forEach(function (particle) {
+        ctx.save();
+        // フェードアウト効果
+        var alpha = particle.life / particle.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = particle.color;
+        ctx.beginPath();
+        ctx.arc(particle.position.x, particle.position.y, particle.size, 0, Math.PI * 2);
+        ctx.fill();
+        // スパークパーティクルは光る効果
+        if (particle.type === 'spark') {
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.arc(particle.position.x, particle.position.y, particle.size * 0.5, 0, Math.PI * 2);
+            ctx.fill();
         }
         ctx.restore();
     });
@@ -791,6 +915,11 @@ function checkCollisions() {
                 // 衝突処理
                 bullets.splice(i, 1);
                 asteroids.splice(j, 1);
+                // ゲームジュース効果
+                startScreenShake(6); // 小惑星破壊は軽めのシェイク
+                startFreezeFrame();
+                createParticles(asteroid.position.x, asteroid.position.y, 8, 'debris');
+                createParticles(asteroid.position.x, asteroid.position.y, 5, 'spark');
                 // 爆発音を再生
                 soundManager.play('explosion');
                 // スコア加算（スコア倍率パワーアップを考慮）
@@ -858,6 +987,11 @@ function checkCollisions() {
                 // 衝突処理
                 lives--;
                 updateUI();
+                // ゲームジュース効果（宇宙船破壊は強めの効果）
+                startScreenShake(12);
+                startFreezeFrame();
+                createParticles(ship.position.x, ship.position.y, 15, 'debris');
+                createParticles(ship.position.x, ship.position.y, 10, 'spark');
                 // 爆発エフェクトを生成
                 createExplosionEffect(ship.position.x, ship.position.y);
                 // 爆発音を再生
@@ -1052,6 +1186,12 @@ function drawShip() {
         ctx.strokeStyle = '#ff6600';
         ctx.lineWidth = 3;
         ctx.stroke();
+        // 推進時のパーティクル効果（たまに生成）
+        if (Math.random() < 0.3) {
+            var thrusterX = ship.position.x + Math.cos(ship.rotation + Math.PI) * SHIP_SIZE;
+            var thrusterY = ship.position.y + Math.sin(ship.rotation + Math.PI) * SHIP_SIZE;
+            createParticles(thrusterX, thrusterY, 2, 'thruster');
+        }
     }
     ctx.restore();
 }
@@ -1223,6 +1363,34 @@ function gameLoop() {
             keys[' '] = false;
         }
     }
+    // フリーズフレーム処理
+    if (freezeFrames > 0) {
+        freezeFrames--;
+        // フリーズ中は更新を停止
+        if (freezeFrames > 0) {
+            // 描画のみ実行
+            ctx.save();
+            // 画面シェイク効果
+            if (screenShake) {
+                var shakeX = (Math.random() - 0.5) * screenShake.intensity;
+                var shakeY = (Math.random() - 0.5) * screenShake.intensity;
+                ctx.translate(shakeX, shakeY);
+            }
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(-50, -50, CANVAS_WIDTH + 100, CANVAS_HEIGHT + 100);
+            if (!gameOver) {
+                drawShip();
+            }
+            drawBullets();
+            drawAsteroids();
+            drawPowerUps();
+            drawParticles();
+            drawExplosionEffects();
+            ctx.restore();
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+    }
     if (!gameOver) {
         // ゲーム状態の更新
         updateShip();
@@ -1232,13 +1400,22 @@ function gameLoop() {
         updateUFOBullets();
         updatePowerUps();
         updatePowerUpUI();
+        updateParticles();
+        updateScreenShake();
         updateExplosionEffects();
         checkCollisions();
         checkLevelProgress();
     }
     // 描画
+    ctx.save();
+    // 画面シェイク効果
+    if (screenShake) {
+        var shakeX = (Math.random() - 0.5) * screenShake.intensity;
+        var shakeY = (Math.random() - 0.5) * screenShake.intensity;
+        ctx.translate(shakeX, shakeY);
+    }
     ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.fillRect(-50, -50, CANVAS_WIDTH + 100, CANVAS_HEIGHT + 100);
     if (!gameOver) {
         drawShip();
     }
@@ -1247,7 +1424,9 @@ function gameLoop() {
     drawAsteroids();
     drawUFOs();
     drawPowerUps();
+    drawParticles();
     drawExplosionEffects();
+    ctx.restore();
     requestAnimationFrame(gameLoop);
 }
 // ゲーム開始
