@@ -9,7 +9,7 @@ var __assign = (this && this.__assign) || function () {
     };
     return __assign.apply(this, arguments);
 };
-var _a;
+var _a, _b;
 // 効果音を管理するクラス
 var SoundManager = /** @class */ (function () {
     function SoundManager() {
@@ -79,6 +79,12 @@ var PowerUpType;
     PowerUpType["RAPID_FIRE"] = "rapid_fire";
     PowerUpType["SCORE_MULTIPLIER"] = "score_multiplier";
 })(PowerUpType || (PowerUpType = {}));
+// UFO敵キャラクターの型定義
+var UFOType;
+(function (UFOType) {
+    UFOType["SMALL"] = "small";
+    UFOType["LARGE"] = "large";
+})(UFOType || (UFOType = {}));
 // ゲーム状態
 var ship;
 var bullets = [];
@@ -94,12 +100,41 @@ var POWER_UP_LIFETIME = 900; // 15秒（60fps想定）
 var POWER_UP_SPEED = 0.5;
 // パワーアップ効果時間（フレーム数）
 var POWER_UP_DURATIONS = (_a = {},
-    _a[PowerUpType.SHIELD] = 600,
-    _a[PowerUpType.TRIPLE_SHOT] = 480,
-    _a[PowerUpType.RAPID_FIRE] = 360,
-    _a[PowerUpType.SCORE_MULTIPLIER] = 420 // 7秒
+    _a[PowerUpType.SHIELD] = 1200,
+    _a[PowerUpType.TRIPLE_SHOT] = 960,
+    _a[PowerUpType.RAPID_FIRE] = 720,
+    _a[PowerUpType.SCORE_MULTIPLIER] = 840 // 14秒（倍）
 ,
     _a);
+;
+// UFO関連の変数
+var ufos = [];
+var ufoBullets = [];
+var ufoSpawnTimer = 0;
+// UFO設定
+var UFO_SPAWN_INTERVAL = 1800; // 30秒（60fps想定）
+var UFO_SPAWN_CHANCE = 0.3; // レベル3以降でのスポーン確率
+var UFO_SETTINGS = (_b = {},
+    _b[UFOType.SMALL] = {
+        size: 15,
+        health: 1,
+        speed: 1.5,
+        shootCooldown: 120, // 2秒
+        changeDirectionInterval: 180, // 3秒
+        points: 1000
+    },
+    _b[UFOType.LARGE] = {
+        size: 25,
+        health: 2,
+        speed: 1.0,
+        shootCooldown: 90, // 1.5秒
+        changeDirectionInterval: 240, // 4秒
+        points: 500
+    },
+    _b);
+// UFO弾設定
+var UFO_BULLET_SPEED = 3;
+var UFO_BULLET_LIFE = 300; // 5秒
 var score = 0;
 var lives = 3;
 var level = 1;
@@ -562,6 +597,187 @@ function hasPowerUp(type) {
     }
     return false;
 }
+// UFOの生成
+function spawnUFO() {
+    // レベル3以降でのみUFO出現
+    if (level < 3)
+        return;
+    // スポーン確率チェック
+    if (Math.random() > UFO_SPAWN_CHANCE)
+        return;
+    // 既にUFOが存在する場合は生成しない（1体まで）
+    if (ufos.length > 0)
+        return;
+    // UFOタイプの決定（レベルが高いほど小UFOの確率増加）
+    var ufoType = level < 5 || Math.random() < 0.7 ? UFOType.LARGE : UFOType.SMALL;
+    var settings = UFO_SETTINGS[ufoType];
+    // 画面端からランダムな位置で出現
+    var x, y;
+    var side = Math.floor(Math.random() * 4);
+    switch (side) {
+        case 0: // 上
+            x = Math.random() * CANVAS_WIDTH;
+            y = -settings.size;
+            break;
+        case 1: // 右
+            x = CANVAS_WIDTH + settings.size;
+            y = Math.random() * CANVAS_HEIGHT;
+            break;
+        case 2: // 下
+            x = Math.random() * CANVAS_WIDTH;
+            y = CANVAS_HEIGHT + settings.size;
+            break;
+        case 3: // 左
+        default:
+            x = -settings.size;
+            y = Math.random() * CANVAS_HEIGHT;
+            break;
+    }
+    // 初期移動方向をプレイヤー方向に設定
+    var angle = Math.atan2(ship.position.y - y, ship.position.x - x);
+    var ufo = {
+        position: { x: x, y: y },
+        velocity: {
+            x: Math.cos(angle) * settings.speed,
+            y: Math.sin(angle) * settings.speed
+        },
+        type: ufoType,
+        size: settings.size,
+        health: settings.health,
+        maxHealth: settings.health,
+        shootCooldown: 0,
+        maxShootCooldown: settings.shootCooldown,
+        changeDirectionTimer: settings.changeDirectionInterval,
+        maxChangeDirectionTimer: settings.changeDirectionInterval,
+        targetAngle: angle
+    };
+    ufos.push(ufo);
+}
+// UFOの更新
+function updateUFOs() {
+    // UFOスポーンタイマー
+    ufoSpawnTimer++;
+    if (ufoSpawnTimer >= UFO_SPAWN_INTERVAL) {
+        ufoSpawnTimer = 0;
+        spawnUFO();
+    }
+    for (var i = ufos.length - 1; i >= 0; i--) {
+        var ufo = ufos[i];
+        var settings = UFO_SETTINGS[ufo.type];
+        // 移動方向変更タイマー
+        ufo.changeDirectionTimer--;
+        if (ufo.changeDirectionTimer <= 0) {
+            // 新しい目標方向を設定（プレイヤーの方向 + ランダムな偏差）
+            var playerAngle = Math.atan2(ship.position.y - ufo.position.y, ship.position.x - ufo.position.x);
+            var randomOffset = (Math.random() - 0.5) * Math.PI * 0.5; // ±45度
+            ufo.targetAngle = playerAngle + randomOffset;
+            ufo.velocity.x = Math.cos(ufo.targetAngle) * settings.speed;
+            ufo.velocity.y = Math.sin(ufo.targetAngle) * settings.speed;
+            ufo.changeDirectionTimer = ufo.maxChangeDirectionTimer;
+        }
+        // 位置更新
+        ufo.position.x += ufo.velocity.x;
+        ufo.position.y += ufo.velocity.y;
+        // 画面端でのラップアラウンド
+        if (ufo.position.x < -ufo.size)
+            ufo.position.x = CANVAS_WIDTH + ufo.size;
+        if (ufo.position.x > CANVAS_WIDTH + ufo.size)
+            ufo.position.x = -ufo.size;
+        if (ufo.position.y < -ufo.size)
+            ufo.position.y = CANVAS_HEIGHT + ufo.size;
+        if (ufo.position.y > CANVAS_HEIGHT + ufo.size)
+            ufo.position.y = -ufo.size;
+        // 射撃クールダウン
+        ufo.shootCooldown--;
+        if (ufo.shootCooldown <= 0) {
+            shootUFOBullet(ufo);
+            ufo.shootCooldown = ufo.maxShootCooldown;
+        }
+    }
+}
+// UFO弾の発射
+function shootUFOBullet(ufo) {
+    // プレイヤーの位置を予測して射撃（簡易な先読み）
+    var predictFrames = 30; // 0.5秒先を予測
+    var predictedX = ship.position.x + ship.velocity.x * predictFrames;
+    var predictedY = ship.position.y + ship.velocity.y * predictFrames;
+    var angle = Math.atan2(predictedY - ufo.position.y, predictedX - ufo.position.x);
+    // 少し精度を下げる（完璧すぎないように）
+    var accuracy = ufo.type === UFOType.SMALL ? 0.9 : 0.7;
+    var finalAngle = angle + (Math.random() - 0.5) * (1 - accuracy) * Math.PI * 0.3;
+    var ufoBullet = {
+        position: { x: ufo.position.x, y: ufo.position.y },
+        velocity: {
+            x: Math.cos(finalAngle) * UFO_BULLET_SPEED,
+            y: Math.sin(finalAngle) * UFO_BULLET_SPEED
+        },
+        life: UFO_BULLET_LIFE,
+        maxLife: UFO_BULLET_LIFE
+    };
+    ufoBullets.push(ufoBullet);
+    // UFO射撃音（レーザー音を使用）
+    soundManager.play('laser');
+}
+// UFO弾の更新
+function updateUFOBullets() {
+    for (var i = ufoBullets.length - 1; i >= 0; i--) {
+        var bullet = ufoBullets[i];
+        // 位置更新
+        bullet.position.x += bullet.velocity.x;
+        bullet.position.y += bullet.velocity.y;
+        // ライフ減少
+        bullet.life--;
+        // 画面外または寿命が尽きたら削除
+        if (bullet.life <= 0 ||
+            bullet.position.x < -10 || bullet.position.x > CANVAS_WIDTH + 10 ||
+            bullet.position.y < -10 || bullet.position.y > CANVAS_HEIGHT + 10) {
+            ufoBullets.splice(i, 1);
+        }
+    }
+}
+// UFOの描画
+function drawUFOs() {
+    ufos.forEach(function (ufo) {
+        ctx.save();
+        ctx.translate(ufo.position.x, ufo.position.y);
+        // UFOタイプに応じた色
+        var color = ufo.type === UFOType.SMALL ? '#FF6B35' : '#4ECDC4';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        // UFO本体（楕円形）
+        ctx.beginPath();
+        ctx.ellipse(0, 0, ufo.size, ufo.size * 0.6, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        // UFOドーム部分
+        ctx.beginPath();
+        ctx.ellipse(0, -ufo.size * 0.2, ufo.size * 0.6, ufo.size * 0.3, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        // ダメージ表示（体力が減っている場合）
+        if (ufo.health < ufo.maxHealth) {
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 1;
+            var flashSpeed = Math.sin(Date.now() * 0.02);
+            if (flashSpeed > 0) {
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+    });
+}
+// UFO弾の描画
+function drawUFOBullets() {
+    ctx.fillStyle = '#FF6B35';
+    ufoBullets.forEach(function (bullet) {
+        ctx.save();
+        // フェード効果
+        var alpha = bullet.life / bullet.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(bullet.position.x, bullet.position.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    });
+}
 function checkCollisions() {
     // 弾と小惑星の衝突判定
     for (var i = bullets.length - 1; i >= 0; i--) {
@@ -643,6 +859,74 @@ function checkCollisions() {
                 lives--;
                 updateUI();
                 // 爆発エフェクトを生成
+                createExplosionEffect(ship.position.x, ship.position.y);
+                // 爆発音を再生
+                soundManager.play('explosion');
+                if (lives <= 0) {
+                    gameOver = true;
+                    showGameOver();
+                }
+                else {
+                    // 宇宙船を初期位置に戻す
+                    ship.position = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+                    ship.velocity = { x: 0, y: 0 };
+                    ship.rotationVelocity = 0;
+                }
+                break;
+            }
+        }
+    }
+    // プレイヤー弾とUFOの衝突判定
+    for (var i = bullets.length - 1; i >= 0; i--) {
+        var bullet = bullets[i];
+        for (var j = ufos.length - 1; j >= 0; j--) {
+            var ufo = ufos[j];
+            var dx = bullet.position.x - ufo.position.x;
+            var dy = bullet.position.y - ufo.position.y;
+            var distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < ufo.size) {
+                // 弾を削除
+                bullets.splice(i, 1);
+                // UFOのダメージ処理
+                ufo.health--;
+                if (ufo.health <= 0) {
+                    // UFO破壊
+                    ufos.splice(j, 1);
+                    // スコア加算
+                    var settings = UFO_SETTINGS[ufo.type];
+                    var baseScore = settings.points;
+                    if (hasPowerUp(PowerUpType.SCORE_MULTIPLIER)) {
+                        baseScore *= 2;
+                    }
+                    score += baseScore;
+                    updateUI();
+                    // 爆発エフェクト
+                    createExplosionEffect(ufo.position.x, ufo.position.y);
+                    // パワーアップ生成チャンス（UFOは高確率）
+                    if (Math.random() < 0.5) {
+                        createPowerUp(ufo.position.x, ufo.position.y);
+                    }
+                }
+                // 爆発音を再生
+                soundManager.play('explosion');
+                break;
+            }
+        }
+    }
+    // UFO弾と宇宙船の衝突判定（シールドパワーアップを考慮）
+    if (!hasPowerUp(PowerUpType.SHIELD)) {
+        for (var i = ufoBullets.length - 1; i >= 0; i--) {
+            var ufoBullet = ufoBullets[i];
+            var dx = ship.position.x - ufoBullet.position.x;
+            var dy = ship.position.y - ufoBullet.position.y;
+            var distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < SHIP_SIZE / 2 + 3) {
+                // UFO弾を削除
+                ufoBullets.splice(i, 1);
+                // 宇宙船ダメージ処理
+                lives--;
+                updateUI();
+                // 爆発エフェクト
                 createExplosionEffect(ship.position.x, ship.position.y);
                 // 爆発音を再生
                 soundManager.play('explosion');
@@ -944,6 +1228,8 @@ function gameLoop() {
         updateShip();
         updateBullets();
         updateAsteroids();
+        updateUFOs();
+        updateUFOBullets();
         updatePowerUps();
         updatePowerUpUI();
         updateExplosionEffects();
@@ -957,7 +1243,9 @@ function gameLoop() {
         drawShip();
     }
     drawBullets();
+    drawUFOBullets();
     drawAsteroids();
+    drawUFOs();
     drawPowerUps();
     drawExplosionEffects();
     requestAnimationFrame(gameLoop);
