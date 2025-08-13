@@ -306,21 +306,23 @@ function createAsteroid() {
     var vertices = [];
     var angleStep = (Math.PI * 2) / ASTEROID_VERTICES;
     for (var i = 0; i < ASTEROID_VERTICES; i++) {
-        var radius = ASTEROID_SIZE / 2 * (0.8 + Math.random() * 0.4);
+        var radius_1 = ASTEROID_SIZE / 2 * (0.8 + Math.random() * 0.4);
         vertices.push({
-            x: Math.cos(angleStep * i) * radius,
-            y: Math.sin(angleStep * i) * radius
+            x: Math.cos(angleStep * i) * radius_1,
+            y: Math.sin(angleStep * i) * radius_1
         });
     }
+    var radius = ASTEROID_SIZE / 2;
     asteroids.push({
         position: { x: x, y: y },
         velocity: {
             x: Math.cos(angle) * speed,
             y: Math.sin(angle) * speed
         },
-        radius: ASTEROID_SIZE / 2,
+        radius: radius,
         angle: Math.random() * Math.PI * 2,
-        vertices: vertices
+        vertices: vertices,
+        mass: radius * radius * 0.1 // 質量は半径の2乗に比例
     });
 }
 // 宇宙船の更新
@@ -359,6 +361,45 @@ function wrapAroundScreenWithSize(obj, size) {
 function updatePosition(obj) {
     obj.position.x += obj.velocity.x;
     obj.position.y += obj.velocity.y;
+}
+// 小惑星同士の衝突処理（運動量保存）
+function handleAsteroidCollision(asteroid1, asteroid2) {
+    // 衝突軸（2つの小惑星を結ぶ直線）を計算
+    var dx = asteroid2.position.x - asteroid1.position.x;
+    var dy = asteroid2.position.y - asteroid1.position.y;
+    var distance = Math.sqrt(dx * dx + dy * dy);
+    // 正規化された衝突軸
+    var nx = dx / distance;
+    var ny = dy / distance;
+    // 相対速度を衝突軸方向に投影
+    var dvx = asteroid2.velocity.x - asteroid1.velocity.x;
+    var dvy = asteroid2.velocity.y - asteroid1.velocity.y;
+    var dvn = dvx * nx + dvy * ny;
+    // 既に離れている場合は処理しない
+    if (dvn > 0)
+        return;
+    // 反発係数（0.8で適度な弾性衝突）
+    var restitution = 0.8;
+    // 衝突インパルス
+    var impulse = -(1 + restitution) * dvn / (1 / asteroid1.mass + 1 / asteroid2.mass);
+    // 速度を更新（運動量保存）
+    asteroid1.velocity.x -= impulse * nx / asteroid1.mass;
+    asteroid1.velocity.y -= impulse * ny / asteroid1.mass;
+    asteroid2.velocity.x += impulse * nx / asteroid2.mass;
+    asteroid2.velocity.y += impulse * ny / asteroid2.mass;
+    // 小惑星が重なっている場合は分離
+    var overlap = (asteroid1.radius + asteroid2.radius) - distance;
+    if (overlap > 0) {
+        var separation = overlap / 2;
+        asteroid1.position.x -= nx * separation;
+        asteroid1.position.y -= ny * separation;
+        asteroid2.position.x += nx * separation;
+        asteroid2.position.y += ny * separation;
+    }
+    // 衝突エフェクト
+    var collisionX = (asteroid1.position.x + asteroid2.position.x) / 2;
+    var collisionY = (asteroid1.position.y + asteroid2.position.y) / 2;
+    createParticles(collisionX, collisionY, 3, 'spark');
 }
 function updateShip() {
     // 姿勢制御スラスター（回転 + 副次的な並進力）
@@ -436,6 +477,18 @@ function updateAsteroids() {
         wrapAroundScreenWithSize(asteroid, ASTEROID_SIZE);
         // 回転
         asteroid.angle += 0.01;
+    }
+    // 小惑星同士の衝突判定
+    for (var i = 0; i < asteroids.length; i++) {
+        for (var j = i + 1; j < asteroids.length; j++) {
+            var asteroid1 = asteroids[i];
+            var asteroid2 = asteroids[j];
+            var distance = calculateDistance(asteroid1, asteroid2);
+            // 衝突判定
+            if (distance < asteroid1.radius + asteroid2.radius) {
+                handleAsteroidCollision(asteroid1, asteroid2);
+            }
+        }
     }
 }
 // 弾の発射
@@ -964,7 +1017,8 @@ function checkCollisions() {
                             },
                             radius: newSize,
                             angle: Math.random() * Math.PI * 2,
-                            vertices: vertices
+                            vertices: vertices,
+                            mass: newSize * newSize * 0.1 // 質量は半径の2乗に比例
                         });
                     }
                 }
@@ -1272,7 +1326,8 @@ function createLevelAdjustedAsteroid() {
         },
         radius: size,
         angle: Math.random() * Math.PI * 2,
-        vertices: vertices
+        vertices: vertices,
+        mass: size * size * 0.1 // 質量は半径の2乗に比例
     });
 }
 function updateUI() {
