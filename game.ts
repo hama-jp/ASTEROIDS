@@ -158,6 +158,7 @@ type Asteroid = {
     radius: number;
     angle: number;
     vertices: Vector[];
+    mass: number; // 質量（半径の2乗に比例）
 };
 
 type ExplosionEffect = {
@@ -424,15 +425,17 @@ function createAsteroid() {
         });
     }
     
+    const radius = ASTEROID_SIZE / 2;
     asteroids.push({
         position: { x, y },
         velocity: {
             x: Math.cos(angle) * speed,
             y: Math.sin(angle) * speed
         },
-        radius: ASTEROID_SIZE / 2,
+        radius: radius,
         angle: Math.random() * Math.PI * 2,
-        vertices
+        vertices,
+        mass: radius * radius * 0.1 // 質量は半径の2乗に比例
     });
 }
 
@@ -468,6 +471,54 @@ function wrapAroundScreenWithSize(obj: { position: Vector }, size: number): void
 function updatePosition(obj: { position: Vector, velocity: Vector }): void {
     obj.position.x += obj.velocity.x;
     obj.position.y += obj.velocity.y;
+}
+
+// 小惑星同士の衝突処理（運動量保存）
+function handleAsteroidCollision(asteroid1: Asteroid, asteroid2: Asteroid): void {
+    
+    // 衝突軸（2つの小惑星を結ぶ直線）を計算
+    const dx = asteroid2.position.x - asteroid1.position.x;
+    const dy = asteroid2.position.y - asteroid1.position.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // 正規化された衝突軸
+    const nx = dx / distance;
+    const ny = dy / distance;
+    
+    // 相対速度を衝突軸方向に投影
+    const dvx = asteroid2.velocity.x - asteroid1.velocity.x;
+    const dvy = asteroid2.velocity.y - asteroid1.velocity.y;
+    const dvn = dvx * nx + dvy * ny;
+    
+    // 既に離れている場合は処理しない
+    if (dvn > 0) return;
+    
+    // 反発係数（0.8で適度な弾性衝突）
+    const restitution = 0.8;
+    
+    // 衝突インパルス
+    const impulse = -(1 + restitution) * dvn / (1/asteroid1.mass + 1/asteroid2.mass);
+    
+    // 速度を更新（運動量保存）
+    asteroid1.velocity.x -= impulse * nx / asteroid1.mass;
+    asteroid1.velocity.y -= impulse * ny / asteroid1.mass;
+    asteroid2.velocity.x += impulse * nx / asteroid2.mass;
+    asteroid2.velocity.y += impulse * ny / asteroid2.mass;
+    
+    // 小惑星が重なっている場合は分離
+    const overlap = (asteroid1.radius + asteroid2.radius) - distance;
+    if (overlap > 0) {
+        const separation = overlap / 2;
+        asteroid1.position.x -= nx * separation;
+        asteroid1.position.y -= ny * separation;
+        asteroid2.position.x += nx * separation;
+        asteroid2.position.y += ny * separation;
+    }
+    
+    // 衝突エフェクト
+    const collisionX = (asteroid1.position.x + asteroid2.position.x) / 2;
+    const collisionY = (asteroid1.position.y + asteroid2.position.y) / 2;
+    createParticles(collisionX, collisionY, 3, 'spark');
 }
 
 function updateShip() {
@@ -558,6 +609,20 @@ function updateAsteroids() {
         
         // 回転
         asteroid.angle += 0.01;
+    }
+    
+    // 小惑星同士の衝突判定
+    for (let i = 0; i < asteroids.length; i++) {
+        for (let j = i + 1; j < asteroids.length; j++) {
+            const asteroid1 = asteroids[i];
+            const asteroid2 = asteroids[j];
+            const distance = calculateDistance(asteroid1, asteroid2);
+            
+            // 衝突判定
+            if (distance < asteroid1.radius + asteroid2.radius) {
+                handleAsteroidCollision(asteroid1, asteroid2);
+            }
+        }
     }
 }
 
@@ -1160,7 +1225,8 @@ function checkCollisions() {
                             },
                             radius: newSize,
                             angle: Math.random() * Math.PI * 2,
-                            vertices
+                            vertices,
+                            mass: newSize * newSize * 0.1 // 質量は半径の2乗に比例
                         });
                     }
                 }
@@ -1525,7 +1591,8 @@ function createLevelAdjustedAsteroid() {
         },
         radius: size,
         angle: Math.random() * Math.PI * 2,
-        vertices
+        vertices,
+        mass: size * size * 0.1 // 質量は半径の2乗に比例
     });
 }
 
