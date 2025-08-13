@@ -437,6 +437,39 @@ function createAsteroid() {
 }
 
 // 宇宙船の更新
+// ===============================
+// ユーティリティ関数
+// ===============================
+
+// 距離計算（衝突判定用）
+function calculateDistance(obj1: { position: Vector }, obj2: { position: Vector }): number {
+    const dx = obj1.position.x - obj2.position.x;
+    const dy = obj1.position.y - obj2.position.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+// 画面端ラップアラウンド処理（基本版）
+function wrapAroundScreen(obj: { position: Vector }): void {
+    if (obj.position.x < 0) obj.position.x = CANVAS_WIDTH;
+    if (obj.position.x > CANVAS_WIDTH) obj.position.x = 0;
+    if (obj.position.y < 0) obj.position.y = CANVAS_HEIGHT;
+    if (obj.position.y > CANVAS_HEIGHT) obj.position.y = 0;
+}
+
+// 画面端ラップアラウンド処理（サイズオフセット版）
+function wrapAroundScreenWithSize(obj: { position: Vector }, size: number): void {
+    if (obj.position.x < -size) obj.position.x = CANVAS_WIDTH + size;
+    if (obj.position.x > CANVAS_WIDTH + size) obj.position.x = -size;
+    if (obj.position.y < -size) obj.position.y = CANVAS_HEIGHT + size;
+    if (obj.position.y > CANVAS_HEIGHT + size) obj.position.y = -size;
+}
+
+// 位置更新処理
+function updatePosition(obj: { position: Vector, velocity: Vector }): void {
+    obj.position.x += obj.velocity.x;
+    obj.position.y += obj.velocity.y;
+}
+
 function updateShip() {
     // 姿勢制御スラスター（回転 + 副次的な並進力）
     if (keys['ArrowLeft']) {
@@ -490,15 +523,9 @@ function updateShip() {
     ship.velocity.x *= FRICTION;
     ship.velocity.y *= FRICTION;
     
-    // 位置更新
-    ship.position.x += ship.velocity.x;
-    ship.position.y += ship.velocity.y;
-    
-    // 画面端のループ処理
-    if (ship.position.x < 0) ship.position.x = CANVAS_WIDTH;
-    if (ship.position.x > CANVAS_WIDTH) ship.position.x = 0;
-    if (ship.position.y < 0) ship.position.y = CANVAS_HEIGHT;
-    if (ship.position.y > CANVAS_HEIGHT) ship.position.y = 0;
+    // 位置更新と画面端ループ処理
+    updatePosition(ship);
+    wrapAroundScreen(ship);
 }
 
 // 弾の更新
@@ -507,8 +534,7 @@ function updateBullets() {
         const bullet = bullets[i];
         
         // 位置更新
-        bullet.position.x += bullet.velocity.x;
-        bullet.position.y += bullet.velocity.y;
+        updatePosition(bullet);
         
         // 画面外に出たら削除
         if (
@@ -526,15 +552,9 @@ function updateBullets() {
 // 小惑星の更新
 function updateAsteroids() {
     for (const asteroid of asteroids) {
-        // 位置更新
-        asteroid.position.x += asteroid.velocity.x;
-        asteroid.position.y += asteroid.velocity.y;
-        
-        // 画面端のループ処理
-        if (asteroid.position.x < -ASTEROID_SIZE) asteroid.position.x = CANVAS_WIDTH + ASTEROID_SIZE;
-        if (asteroid.position.x > CANVAS_WIDTH + ASTEROID_SIZE) asteroid.position.x = -ASTEROID_SIZE;
-        if (asteroid.position.y < -ASTEROID_SIZE) asteroid.position.y = CANVAS_HEIGHT + ASTEROID_SIZE;
-        if (asteroid.position.y > CANVAS_HEIGHT + ASTEROID_SIZE) asteroid.position.y = -ASTEROID_SIZE;
+        // 位置更新と画面端ループ処理
+        updatePosition(asteroid);
+        wrapAroundScreenWithSize(asteroid, ASTEROID_SIZE);
         
         // 回転
         asteroid.angle += 0.01;
@@ -605,17 +625,11 @@ function updatePowerUps(): void {
     for (let i = powerUps.length - 1; i >= 0; i--) {
         const powerUp = powerUps[i];
         
-        // 位置更新
-        powerUp.position.x += powerUp.velocity.x;
-        powerUp.position.y += powerUp.velocity.y;
+        // 位置更新と画面端ラップアラウンド
+        updatePosition(powerUp);
         powerUp.rotation += 0.02;
         powerUp.lifeTime++;
-        
-        // 画面端でのラップアラウンド
-        if (powerUp.position.x < 0) powerUp.position.x = CANVAS_WIDTH;
-        if (powerUp.position.x > CANVAS_WIDTH) powerUp.position.x = 0;
-        if (powerUp.position.y < 0) powerUp.position.y = CANVAS_HEIGHT;
-        if (powerUp.position.y > CANVAS_HEIGHT) powerUp.position.y = 0;
+        wrapAroundScreen(powerUp);
         
         // ライフタイム終了で削除
         if (powerUp.lifeTime >= powerUp.maxLifeTime) {
@@ -824,15 +838,9 @@ function updateUFOs(): void {
             ufo.changeDirectionTimer = ufo.maxChangeDirectionTimer;
         }
         
-        // 位置更新
-        ufo.position.x += ufo.velocity.x;
-        ufo.position.y += ufo.velocity.y;
-        
-        // 画面端でのラップアラウンド
-        if (ufo.position.x < -ufo.size) ufo.position.x = CANVAS_WIDTH + ufo.size;
-        if (ufo.position.x > CANVAS_WIDTH + ufo.size) ufo.position.x = -ufo.size;
-        if (ufo.position.y < -ufo.size) ufo.position.y = CANVAS_HEIGHT + ufo.size;
-        if (ufo.position.y > CANVAS_HEIGHT + ufo.size) ufo.position.y = -ufo.size;
+        // 位置更新と画面端ラップアラウンド
+        updatePosition(ufo);
+        wrapAroundScreenWithSize(ufo, ufo.size);
         
         // 射撃クールダウン
         ufo.shootCooldown--;
@@ -896,8 +904,7 @@ function updateUFOBullets(): void {
         const bullet = ufoBullets[i];
         
         // 位置更新
-        bullet.position.x += bullet.velocity.x;
-        bullet.position.y += bullet.velocity.y;
+        updatePosition(bullet);
         
         // ライフ減少
         bullet.life--;
@@ -1083,9 +1090,7 @@ function checkCollisions() {
         for (let j = asteroids.length - 1; j >= 0; j--) {
             const asteroid = asteroids[j];
             
-            const dx = bullet.position.x - asteroid.position.x;
-            const dy = bullet.position.y - asteroid.position.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+            const distance = calculateDistance(bullet, asteroid);
             
             if (distance < asteroid.radius) {
                 // 衝突処理
@@ -1168,9 +1173,7 @@ function checkCollisions() {
     // 宇宙船と小惑星の衝突判定（シールドパワーアップを考慮）
     if (!hasPowerUp(PowerUpType.SHIELD)) {
         for (const asteroid of asteroids) {
-            const dx = ship.position.x - asteroid.position.x;
-            const dy = ship.position.y - asteroid.position.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+            const distance = calculateDistance(ship, asteroid);
             
             if (distance < asteroid.radius + SHIP_SIZE / 2) {
                 // 衝突処理
@@ -1210,9 +1213,7 @@ function checkCollisions() {
         
         for (let j = ufos.length - 1; j >= 0; j--) {
             const ufo = ufos[j];
-            const dx = bullet.position.x - ufo.position.x;
-            const dy = bullet.position.y - ufo.position.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+            const distance = calculateDistance(bullet, ufo);
             
             if (distance < ufo.size) {
                 // 弾を削除
@@ -1255,9 +1256,7 @@ function checkCollisions() {
     if (!hasPowerUp(PowerUpType.SHIELD)) {
         for (let i = ufoBullets.length - 1; i >= 0; i--) {
             const ufoBullet = ufoBullets[i];
-            const dx = ship.position.x - ufoBullet.position.x;
-            const dy = ship.position.y - ufoBullet.position.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+            const distance = calculateDistance(ship, ufoBullet);
             
             if (distance < SHIP_SIZE / 2 + 3) {
                 // UFO弾を削除
@@ -1291,9 +1290,7 @@ function checkCollisions() {
     // 宇宙船とパワーアップの衝突判定
     for (let i = powerUps.length - 1; i >= 0; i--) {
         const powerUp = powerUps[i];
-        const dx = ship.position.x - powerUp.position.x;
-        const dy = ship.position.y - powerUp.position.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+        const distance = calculateDistance(ship, powerUp);
         
         if (distance < SHIP_SIZE / 2 + powerUp.size) {
             // パワーアップ取得

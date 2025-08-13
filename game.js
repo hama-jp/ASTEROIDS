@@ -324,6 +324,42 @@ function createAsteroid() {
     });
 }
 // 宇宙船の更新
+// ===============================
+// ユーティリティ関数
+// ===============================
+// 距離計算（衝突判定用）
+function calculateDistance(obj1, obj2) {
+    var dx = obj1.position.x - obj2.position.x;
+    var dy = obj1.position.y - obj2.position.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+// 画面端ラップアラウンド処理（基本版）
+function wrapAroundScreen(obj) {
+    if (obj.position.x < 0)
+        obj.position.x = CANVAS_WIDTH;
+    if (obj.position.x > CANVAS_WIDTH)
+        obj.position.x = 0;
+    if (obj.position.y < 0)
+        obj.position.y = CANVAS_HEIGHT;
+    if (obj.position.y > CANVAS_HEIGHT)
+        obj.position.y = 0;
+}
+// 画面端ラップアラウンド処理（サイズオフセット版）
+function wrapAroundScreenWithSize(obj, size) {
+    if (obj.position.x < -size)
+        obj.position.x = CANVAS_WIDTH + size;
+    if (obj.position.x > CANVAS_WIDTH + size)
+        obj.position.x = -size;
+    if (obj.position.y < -size)
+        obj.position.y = CANVAS_HEIGHT + size;
+    if (obj.position.y > CANVAS_HEIGHT + size)
+        obj.position.y = -size;
+}
+// 位置更新処理
+function updatePosition(obj) {
+    obj.position.x += obj.velocity.x;
+    obj.position.y += obj.velocity.y;
+}
 function updateShip() {
     // 姿勢制御スラスター（回転 + 副次的な並進力）
     if (keys['ArrowLeft']) {
@@ -371,26 +407,16 @@ function updateShip() {
     // 摩擦
     ship.velocity.x *= FRICTION;
     ship.velocity.y *= FRICTION;
-    // 位置更新
-    ship.position.x += ship.velocity.x;
-    ship.position.y += ship.velocity.y;
-    // 画面端のループ処理
-    if (ship.position.x < 0)
-        ship.position.x = CANVAS_WIDTH;
-    if (ship.position.x > CANVAS_WIDTH)
-        ship.position.x = 0;
-    if (ship.position.y < 0)
-        ship.position.y = CANVAS_HEIGHT;
-    if (ship.position.y > CANVAS_HEIGHT)
-        ship.position.y = 0;
+    // 位置更新と画面端ループ処理
+    updatePosition(ship);
+    wrapAroundScreen(ship);
 }
 // 弾の更新
 function updateBullets() {
     for (var i = bullets.length - 1; i >= 0; i--) {
         var bullet = bullets[i];
         // 位置更新
-        bullet.position.x += bullet.velocity.x;
-        bullet.position.y += bullet.velocity.y;
+        updatePosition(bullet);
         // 画面外に出たら削除
         if (bullet.position.x < 0 ||
             bullet.position.x > CANVAS_WIDTH ||
@@ -405,18 +431,9 @@ function updateBullets() {
 function updateAsteroids() {
     for (var _i = 0, asteroids_1 = asteroids; _i < asteroids_1.length; _i++) {
         var asteroid = asteroids_1[_i];
-        // 位置更新
-        asteroid.position.x += asteroid.velocity.x;
-        asteroid.position.y += asteroid.velocity.y;
-        // 画面端のループ処理
-        if (asteroid.position.x < -ASTEROID_SIZE)
-            asteroid.position.x = CANVAS_WIDTH + ASTEROID_SIZE;
-        if (asteroid.position.x > CANVAS_WIDTH + ASTEROID_SIZE)
-            asteroid.position.x = -ASTEROID_SIZE;
-        if (asteroid.position.y < -ASTEROID_SIZE)
-            asteroid.position.y = CANVAS_HEIGHT + ASTEROID_SIZE;
-        if (asteroid.position.y > CANVAS_HEIGHT + ASTEROID_SIZE)
-            asteroid.position.y = -ASTEROID_SIZE;
+        // 位置更新と画面端ループ処理
+        updatePosition(asteroid);
+        wrapAroundScreenWithSize(asteroid, ASTEROID_SIZE);
         // 回転
         asteroid.angle += 0.01;
     }
@@ -480,20 +497,11 @@ function createPowerUp(x, y) {
 function updatePowerUps() {
     for (var i = powerUps.length - 1; i >= 0; i--) {
         var powerUp = powerUps[i];
-        // 位置更新
-        powerUp.position.x += powerUp.velocity.x;
-        powerUp.position.y += powerUp.velocity.y;
+        // 位置更新と画面端ラップアラウンド
+        updatePosition(powerUp);
         powerUp.rotation += 0.02;
         powerUp.lifeTime++;
-        // 画面端でのラップアラウンド
-        if (powerUp.position.x < 0)
-            powerUp.position.x = CANVAS_WIDTH;
-        if (powerUp.position.x > CANVAS_WIDTH)
-            powerUp.position.x = 0;
-        if (powerUp.position.y < 0)
-            powerUp.position.y = CANVAS_HEIGHT;
-        if (powerUp.position.y > CANVAS_HEIGHT)
-            powerUp.position.y = 0;
+        wrapAroundScreen(powerUp);
         // ライフタイム終了で削除
         if (powerUp.lifeTime >= powerUp.maxLifeTime) {
             powerUps.splice(i, 1);
@@ -684,18 +692,9 @@ function updateUFOs() {
             ufo.velocity.y = Math.sin(ufo.targetAngle) * settings.speed;
             ufo.changeDirectionTimer = ufo.maxChangeDirectionTimer;
         }
-        // 位置更新
-        ufo.position.x += ufo.velocity.x;
-        ufo.position.y += ufo.velocity.y;
-        // 画面端でのラップアラウンド
-        if (ufo.position.x < -ufo.size)
-            ufo.position.x = CANVAS_WIDTH + ufo.size;
-        if (ufo.position.x > CANVAS_WIDTH + ufo.size)
-            ufo.position.x = -ufo.size;
-        if (ufo.position.y < -ufo.size)
-            ufo.position.y = CANVAS_HEIGHT + ufo.size;
-        if (ufo.position.y > CANVAS_HEIGHT + ufo.size)
-            ufo.position.y = -ufo.size;
+        // 位置更新と画面端ラップアラウンド
+        updatePosition(ufo);
+        wrapAroundScreenWithSize(ufo, ufo.size);
         // 射撃クールダウン
         ufo.shootCooldown--;
         if (ufo.shootCooldown <= 0) {
@@ -749,8 +748,7 @@ function updateUFOBullets() {
     for (var i = ufoBullets.length - 1; i >= 0; i--) {
         var bullet = ufoBullets[i];
         // 位置更新
-        bullet.position.x += bullet.velocity.x;
-        bullet.position.y += bullet.velocity.y;
+        updatePosition(bullet);
         // ライフ減少
         bullet.life--;
         // 画面外または寿命が尽きたら削除
@@ -908,9 +906,7 @@ function checkCollisions() {
         var bullet = bullets[i];
         for (var j = asteroids.length - 1; j >= 0; j--) {
             var asteroid = asteroids[j];
-            var dx = bullet.position.x - asteroid.position.x;
-            var dy = bullet.position.y - asteroid.position.y;
-            var distance = Math.sqrt(dx * dx + dy * dy);
+            var distance = calculateDistance(bullet, asteroid);
             if (distance < asteroid.radius) {
                 // 衝突処理
                 bullets.splice(i, 1);
@@ -980,9 +976,7 @@ function checkCollisions() {
     if (!hasPowerUp(PowerUpType.SHIELD)) {
         for (var _i = 0, asteroids_2 = asteroids; _i < asteroids_2.length; _i++) {
             var asteroid = asteroids_2[_i];
-            var dx = ship.position.x - asteroid.position.x;
-            var dy = ship.position.y - asteroid.position.y;
-            var distance = Math.sqrt(dx * dx + dy * dy);
+            var distance = calculateDistance(ship, asteroid);
             if (distance < asteroid.radius + SHIP_SIZE / 2) {
                 // 衝突処理
                 lives--;
@@ -1015,9 +1009,7 @@ function checkCollisions() {
         var bullet = bullets[i];
         for (var j = ufos.length - 1; j >= 0; j--) {
             var ufo = ufos[j];
-            var dx = bullet.position.x - ufo.position.x;
-            var dy = bullet.position.y - ufo.position.y;
-            var distance = Math.sqrt(dx * dx + dy * dy);
+            var distance = calculateDistance(bullet, ufo);
             if (distance < ufo.size) {
                 // 弾を削除
                 bullets.splice(i, 1);
@@ -1051,9 +1043,7 @@ function checkCollisions() {
     if (!hasPowerUp(PowerUpType.SHIELD)) {
         for (var i = ufoBullets.length - 1; i >= 0; i--) {
             var ufoBullet = ufoBullets[i];
-            var dx = ship.position.x - ufoBullet.position.x;
-            var dy = ship.position.y - ufoBullet.position.y;
-            var distance = Math.sqrt(dx * dx + dy * dy);
+            var distance = calculateDistance(ship, ufoBullet);
             if (distance < SHIP_SIZE / 2 + 3) {
                 // UFO弾を削除
                 ufoBullets.splice(i, 1);
@@ -1081,9 +1071,7 @@ function checkCollisions() {
     // 宇宙船とパワーアップの衝突判定
     for (var i = powerUps.length - 1; i >= 0; i--) {
         var powerUp = powerUps[i];
-        var dx = ship.position.x - powerUp.position.x;
-        var dy = ship.position.y - powerUp.position.y;
-        var distance = Math.sqrt(dx * dx + dy * dy);
+        var distance = calculateDistance(ship, powerUp);
         if (distance < SHIP_SIZE / 2 + powerUp.size) {
             // パワーアップ取得
             powerUps.splice(i, 1);
