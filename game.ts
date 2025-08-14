@@ -42,6 +42,211 @@ class SoundManager {
     }
 }
 
+// シンプルな音楽管理クラス
+class MusicManager {
+    private layers: { [key: string]: HTMLAudioElement[] } = {};
+    private currentPatterns: { [key: string]: number } = {};
+    private trackVolumes: { [key: string]: number } = {};
+    private isPlaying = false;
+    private fadeInterval: number | null = null;
+    private currentPhase = 0;
+
+    constructor() {
+        this.initializeLayers();
+    }
+
+    private initializeLayers() {
+        console.log('MusicManager: Initializing layers...');
+        const tracks = ['base', 'drums', 'synth'];
+        
+        tracks.forEach(track => {
+            this.layers[track] = [];
+            this.currentPatterns[track] = 0;
+            this.trackVolumes[track] = 0.7; // デフォルトボリューム
+            console.log(`Loading track: ${track}`);
+            
+            // 各トラックのパターンを読み込み（baseとsynthは20パターン、drumsは10パターン）
+            const maxPatterns = (track === 'synth' || track === 'base') ? 20 : 10;
+            for (let i = 0; i < maxPatterns; i++) {
+                const audio = new Audio();
+                const fileName = `${track}_${i < 10 ? '0' + i : i}.wav`;
+                audio.src = `music/${track}/${fileName}`;
+                audio.preload = 'none'; // 自動読み込みを無効化
+                audio.loop = true;
+                audio.volume = 0;
+                
+                // デバッグ用イベントリスナー
+                audio.addEventListener('loadstart', () => console.log(`Loading: ${audio.src}`));
+                audio.addEventListener('canplay', () => console.log(`Ready: ${audio.src}`));
+                audio.addEventListener('error', (e) => console.error(`Error loading: ${audio.src}`, e));
+                
+                this.layers[track].push(audio);
+            }
+        });
+    }
+
+    public start() {
+        if (this.isPlaying) return;
+        
+        console.log('MusicManager: Starting music...');
+        this.isPlaying = true;
+        this.currentPhase = 0;
+        this.updatePatterns();
+        this.fadeIn();
+    }
+
+    public stop() {
+        if (!this.isPlaying) return;
+        
+        this.fadeOut(() => {
+            this.isPlaying = false;
+            this.stopAllLayers();
+        });
+    }
+
+
+
+    public updateForScore(score: number) {
+        const newPhase = Math.floor(score / 1000);
+        if (newPhase !== this.currentPhase && this.isPlaying) {
+            this.currentPhase = newPhase;
+            this.transitionToNewPhase();
+        }
+    }
+
+    private updatePatterns() {
+        // スコアフェーズに基づいてパターンを選択
+        const phase = Math.min(this.currentPhase, 19); // synthは20パターンまで対応
+        
+        // baseとsynthは20パターン、drumsは10パターンまで
+        this.currentPatterns.base = phase;
+        this.currentPatterns.drums = Math.min(phase, 9);
+        this.currentPatterns.synth = phase;
+        
+        // トラックボリュームの設定（基本的に全部鳴っていて、たまにミュート）
+        this.trackVolumes.base = 0.7; // ベースは常に鳴る
+        
+        // フェーズに応じてたまにトラックをミュート（各10%の確率）
+        this.trackVolumes.drums = Math.random() < 0.1 ? 0 : 0.6;
+        this.trackVolumes.synth = Math.random() < 0.1 ? 0 : 0.5;
+    }
+
+    private transitionToNewPhase() {
+        this.fadeOut(() => {
+            this.updatePatterns();
+            this.fadeIn();
+        });
+    }
+
+    private fadeIn() {
+        this.startCurrentPatterns();
+        
+        const duration = 5000; // 5秒でフェードイン
+        const steps = 150;
+        const stepTime = duration / steps;
+        const volumeStep = 0.7 / steps;
+        
+        let currentStep = 0;
+        
+        const fadeInInterval = setInterval(() => {
+            currentStep++;
+            const volume = Math.min(currentStep * volumeStep, 0.7);
+            
+            this.setAllVolumes(volume);
+            
+            if (currentStep >= steps) {
+                clearInterval(fadeInInterval);
+            }
+        }, stepTime);
+    }
+
+    private fadeOut(callback?: () => void) {
+        this.fadeOutCustom(5000, callback);
+    }
+
+    private fadeOutCustom(duration: number, callback?: () => void) {
+        console.log(`MusicManager: Starting fade out (${duration}ms)`);
+        if (this.fadeInterval) {
+            clearInterval(this.fadeInterval);
+        }
+        
+        const steps = Math.floor(duration / 33); // 約30fps
+        const stepTime = duration / steps;
+        
+        let currentStep = 0;
+        const startVolume = this.getCurrentVolume();
+        const volumeStep = startVolume / steps;
+        
+        console.log(`Fade parameters: steps=${steps}, stepTime=${stepTime}, startVolume=${startVolume}`);
+        
+        this.fadeInterval = setInterval(() => {
+            currentStep++;
+            const volume = Math.max(startVolume - currentStep * volumeStep, 0);
+            
+            this.setAllVolumes(volume);
+            
+            if (currentStep % 10 === 0) {
+                console.log(`Fade progress: step ${currentStep}/${steps}, volume=${volume}`);
+            }
+            
+            if (currentStep >= steps) {
+                clearInterval(this.fadeInterval!);
+                this.fadeInterval = null;
+                this.stopAllLayers();
+                console.log('Fade out completed');
+                if (callback) callback();
+            }
+        }, stepTime);
+    }
+
+    private startCurrentPatterns() {
+        console.log('MusicManager: Starting current patterns...');
+        Object.keys(this.layers).forEach(track => {
+            const patternIndex = this.currentPatterns[track];
+            const audio = this.layers[track][patternIndex];
+            console.log(`Starting ${track} pattern ${patternIndex}, audio:`, audio ? 'OK' : 'ERROR');
+            if (audio) {
+                // ユーザーインタラクション後に明示的にload
+                if (audio.readyState === 0) {
+                    audio.load();
+                }
+                audio.currentTime = 0;
+                audio.play()
+                    .then(() => console.log(`${track} playing successfully`))
+                    .catch(e => console.error(`音楽再生エラー (${track}):`, e));
+            }
+        });
+    }
+
+    private stopAllLayers() {
+        const tracks = Object.keys(this.layers);
+        tracks.forEach(track => {
+            this.layers[track].forEach(audio => {
+                audio.pause();
+                audio.currentTime = 0;
+            });
+        });
+    }
+
+    private setAllVolumes(masterVolume: number) {
+        Object.keys(this.layers).forEach(track => {
+            const patternIndex = this.currentPatterns[track];
+            const audio = this.layers[track][patternIndex];
+            if (audio) {
+                // マスターボリューム × トラック個別ボリューム
+                audio.volume = masterVolume * this.trackVolumes[track];
+            }
+        });
+    }
+
+    private getCurrentVolume(): number {
+        const firstTrack = Object.keys(this.layers)[0];
+        const firstPattern = this.currentPatterns[firstTrack];
+        const audio = this.layers[firstTrack][firstPattern];
+        return audio ? audio.volume : 0;
+    }
+}
+
 // ゲームの定数
 let CANVAS_WIDTH = 800;
 let CANVAS_HEIGHT = 600;
@@ -238,6 +443,8 @@ let asteroidsDestroyed = 0;
 let highScore = 0;
 let gameOver = false;
 let soundManager: SoundManager;
+let musicManager: MusicManager;
+let musicStarted = false;
 
 // DOM要素
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
@@ -273,6 +480,11 @@ window.addEventListener('resize', () => {
 });
 
 restartButton.addEventListener('click', restartGame);
+
+// クリックで音楽開始
+canvas.addEventListener('click', () => {
+    tryStartMusic();
+});
 
 // ゲーム初期化
 // キャンバスサイズをブラウザウィンドウに合わせて設定
@@ -318,6 +530,7 @@ function initGame() {
     // キャンバスサイズを設定
     resizeCanvas();
     soundManager = new SoundManager();
+    musicManager = new MusicManager();
     
     // ハイスコアを読み込み
     highScore = loadHighScore();
@@ -347,6 +560,7 @@ function initGame() {
     level = 1;
     asteroidsDestroyed = 0;
     gameOver = false;
+    musicStarted = false;
     
     // UIの更新
     updateUI();
@@ -522,6 +736,11 @@ function handleAsteroidCollision(asteroid1: Asteroid, asteroid2: Asteroid): void
 }
 
 function updateShip() {
+    // 任意のキー入力で音楽開始を試行
+    if (keys['ArrowLeft'] || keys['ArrowRight'] || keys['ArrowUp'] || keys[' ']) {
+        tryStartMusic();
+    }
+    
     // 姿勢制御スラスター（回転 + 副次的な並進力）
     if (keys['ArrowLeft']) {
         ship.rotationVelocity -= ROTATION_SPEED;
@@ -1601,6 +1820,11 @@ function updateUI() {
     livesElement.textContent = `Lives: ${lives}`;
     levelElement.textContent = `Level: ${level}`;
     highScoreElement.textContent = `High Score: ${highScore}`;
+    
+    // 音楽の更新（ゲームオーバー時は除く）
+    if (musicManager && !gameOver) {
+        musicManager.updateForScore(score);
+    }
 }
 
 // パワーアップステータス表示の更新
@@ -1651,6 +1875,11 @@ function updatePowerUpUI() {
 
 // ゲームオーバー表示
 function showGameOver() {
+    // 音楽停止を最初に実行
+    if (musicManager) {
+        musicManager.stop();
+    }
+    
     updateHighScore();
     updateUI();
     finalScoreElement.textContent = score.toString();
@@ -1661,13 +1890,31 @@ function showGameOver() {
 function restartGame() {
     // ゲームを再開する前に推進音を停止
     soundManager.stop('thruster');
+    
+    // 音楽停止
+    if (musicManager) {
+        musicManager.stop();
+    }
+    
     initGame();
+}
+
+// 音楽開始のヘルパー関数
+function tryStartMusic() {
+    if (!musicStarted && !gameOver) {
+        musicManager.start();
+        musicStarted = true;
+        console.log('Music started after user interaction');
+    }
 }
 
 // ゲームループ
 function gameLoop() {
     // キー入力処理（スペースキーで弾を発射）
     if (keys[' '] && !gameOver) {
+        // 最初のユーザーインタラクションで音楽開始
+        tryStartMusic();
+        
         // 連射パワーアップの処理
         if (hasPowerUp(PowerUpType.RAPID_FIRE)) {
             // 連射モード：毎フレーム発射可能
